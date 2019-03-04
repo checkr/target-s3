@@ -85,16 +85,17 @@ def delete_tmp_dir(tmp_path):
 
 def upload_to_s3(tmp_path, config, s3):
     for f in os.listdir(tmp_path):
-        
-        if 'line_date_field' in config or 'date' in config:
-            file_name = f.split(DATE_TO_UPLOAD_SEP)[0]
-            upload_date = f.split(DATE_TO_UPLOAD_SEP)[1]
-        else:
-            file_name = f
-            upload_date = datetime.datetime.today().strftime('%Y-%m-%d')
-        
+        file_name = f
+        dt = datetime.datetime.now()
         s3_file_name = os.path.join(
-            config['prefix'], config['client'], file_name, upload_date, file_name)
+            "source="+config["source"], 
+            "collection="+file_name, 
+            "year="+str(dt.year), 
+            "month="+str(dt.month), 
+            "day="+str(dt.day), 
+            "hour="+str(dt.hour), 
+            file_name+"_"+str(dt.minute)+str(dt.microsecond)+".json")
+
         print("S3 path")
         print(s3_file_name)
         logger.info('Uploading to s3: ' + s3_file_name)
