@@ -60,10 +60,10 @@ def create_stream_to_record_map(stream_to_record_map, line, config):
                 break
 
         if time_created:          
-            stream_name = f'{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}-{time_created.hour}'
+            stream_name = f'{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
         else:
             dt = datetime.datetime.now()
-            stream_name = f'{json_line["stream"]}::{dt.year}-{dt.month}-{dt.day}-{dt.hour}'
+            stream_name = f'{json_line["stream"]}::{dt.year}-{dt.month}-{dt.day}'
 
         add_to_stream_records(stream_to_record_map, stream_name, line)
 
@@ -108,7 +108,6 @@ def upload_to_s3(tmp_path, config, s3):
             "year="+str(dt.year), 
             "month="+str(dt.month), 
             "day="+str(dt.day), 
-            "hour="+str(dt.hour), 
             file_name+"_"+str(dt_now.minute)+str(dt_now.second)+str(dt_now.microsecond)+".json")
 
         print("S3 path")
@@ -160,7 +159,7 @@ def main():
             i += 1
             stream_map, last_state = create_stream_to_record_map(stream_map, line, config)
 
-            if i == 10000:
+            if i == 100000:
                 flush(stream_map, last_state, tmp_path, config, s3)
                 i = 0
                 stream_map = {}
