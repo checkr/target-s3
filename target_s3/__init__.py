@@ -10,6 +10,11 @@ import json
 import shutil
 import pkg_resources
 import singer
+from bson import objectid, timestamp, datetime as bson_datetime
+import pytz
+import time
+import tzlocal
+import dateutil.parser
 
 logger = singer.get_logger()
 DATE_TO_UPLOAD_SEP="date_to_upload"
@@ -21,38 +26,47 @@ def emit_state(state):
         sys.stdout.write("{}\n".format(line))
         sys.stdout.flush()
 
-
-def create_stream_to_record_map(input, config):
-    stream_to_record_map = {}
+def create_stream_to_record_map(stream_to_record_map, line, config):
     last_state = None
-    for line in input:
-        try:
-            json_line = json.loads(line)
-        except json.decoder.JSONDecodeError:
-            logger.error("Unable to parse:\n{}".format(line))
-            raise
 
-        if 'type' not in json_line:
+    try:
+        json_line = json.loads(line)
+    except json.decoder.JSONDecodeError:
+        logger.error("Unable to parse:\n{}".format(line))
+        raise
+
+    if 'type' not in json_line:
+        raise Exception(
+            "Line is missing required key 'type': {}".format(line))
+    t = json_line['type']
+
+    if t == 'RECORD':
+        if 'stream' not in json_line:
             raise Exception(
-                "Line is missing required key 'type': {}".format(line))
-        t = json_line['type']
-
-        if t == 'RECORD':
-            if 'stream' not in json_line:
-                raise Exception(
-                    "Line is missing required key 'stream': {}".format(line))
-            stream_name = json_line["stream"]
-            
-            if "line_date_field" in config:
-                date_field = config["line_date_field"][0:10]
-                stream_name = stream_name + DATE_TO_UPLOAD_SEP + json_line['record'][date_field]
-            
-            if "date" in config:
-                date_field = config["date"]
-                stream_name = stream_name + DATE_TO_UPLOAD_SEP + date_field
-            
-            add_to_stream_records(stream_to_record_map, stream_name, line)
+                "Line is missing required key 'stream': {}".format(line))
         
+        time_created = None
+        for (k,v) in json_line['record'].items():
+            if time_created is None:
+                try:
+                    if k == "_id":
+                        oid = objectid.ObjectId(v)
+                        if oid.is_valid: time_created = oid.generation_time
+                    elif k == "created_at":
+                        time_created = dateutil.parser.parse(v)
+                except:
+                    pass
+            else:
+                break
+
+        if time_created:          
+            stream_name = f'{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}-{time_created.hour}'
+        else:
+            dt = datetime.datetime.now()
+            stream_name = f'{json_line["stream"]}::{dt.year}-{dt.month}-{dt.day}-{dt.hour}'
+
+        add_to_stream_records(stream_to_record_map, stream_name, line)
+
         if t == 'STATE' and "state_file_path" in config:
             last_state = json_line
 
@@ -85,8 +99,9 @@ def delete_tmp_dir(tmp_path):
 
 def upload_to_s3(tmp_path, config, s3):
     for f in os.listdir(tmp_path):
-        file_name = f
-        dt = datetime.datetime.now()
+        file_name, created = f.split("::", 2)
+        dt = datetime.datetime.strptime(created, '%Y-%m-%d-%H')
+        dt_now = datetime.datetime.now()
         s3_file_name = os.path.join(
             "source="+config["source"], 
             "collection="+file_name, 
@@ -94,7 +109,7 @@ def upload_to_s3(tmp_path, config, s3):
             "month="+str(dt.month), 
             "day="+str(dt.day), 
             "hour="+str(dt.hour), 
-            file_name+"_"+str(dt.minute)+str(dt.microsecond)+".json")
+            file_name+"_"+str(dt_now.minute)+str(dt_now.second)+str(dt_now.microsecond)+".json")
 
         print("S3 path")
         print(s3_file_name)
@@ -128,7 +143,6 @@ def main():
     args = parser.parse_args()
 
     s3 = boto3.client('s3')
-    tmp_path = create_temp_dir()
 
     if not args.config:
         logger.error("config is required")
@@ -137,17 +151,28 @@ def main():
     with open(args.config) as input:
         config = json.load(input)
 
-    input = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
-    stream_map, last_state = create_stream_to_record_map(input, config)
+    with io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8') as input:
+        i = 0
+        stream_map = {}
+        tmp_path = create_temp_dir()
 
+        for line in input:
+            i += 1
+            stream_map, last_state = create_stream_to_record_map(stream_map, line, config)
+
+            if i == 10000:
+                flush(stream_map, last_state, tmp_path, config, s3)
+                i = 0
+                stream_map = {}
+                tmp_path = create_temp_dir()
+
+def flush(stream_map, last_state, tmp_path, config, s3):
     persist_stream_map(stream_map, tmp_path)
-
     upload_to_s3(tmp_path, config, s3)
     delete_tmp_dir(tmp_path)
 
     if last_state is not None and "state_file_path" in config:
         persist_state(last_state, config)
-
 
 if __name__ == '__main__':
     main()
