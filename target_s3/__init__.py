@@ -166,6 +166,8 @@ def main():
                 stream_map = {}
                 tmp_path = create_temp_dir()
 
+        flush(stream_map, last_state, tmp_path, config, s3)
+
 def flush(stream_map, last_state, tmp_path, config, s3):
     persist_stream_map(stream_map, tmp_path)
     upload_to_s3(tmp_path, config, s3)
