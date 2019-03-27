@@ -15,6 +15,7 @@ import pytz
 import time
 import tzlocal
 import dateutil.parser
+from distutils.util import strtobool
 
 logger = singer.get_logger()
 DATE_TO_UPLOAD_SEP="date_to_upload"
@@ -46,18 +47,20 @@ def create_stream_to_record_map(stream_to_record_map, line, config):
                 "Line is missing required key 'stream': {}".format(line))
         
         time_created = None
-        for (k,v) in json_line['record'].items():
-            if time_created is None:
-                try:
-                    if k == "_id":
-                        oid = objectid.ObjectId(v)
-                        if oid.is_valid: time_created = oid.generation_time
-                    elif k == "created_at":
-                        time_created = dateutil.parser.parse(v)
-                except:
-                    pass
-            else:
-                break
+
+        if 'partition_on_time_created' in config and bool(strtobool(config["partition_on_time_created"])):
+            for (k,v) in json_line['record'].items():
+                if time_created is None:
+                    try:
+                        if k == "_id":
+                            oid = objectid.ObjectId(v)
+                            if oid.is_valid: time_created = oid.generation_time
+                        elif k == "created_at":
+                            time_created = dateutil.parser.parse(v)
+                    except:
+                        pass
+                else:
+                    break
 
         if time_created:          
             stream_name = f'{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
@@ -100,7 +103,7 @@ def delete_tmp_dir(tmp_path):
 def upload_to_s3(tmp_path, config, s3):
     for f in os.listdir(tmp_path):
         file_name, created = f.split("::", 2)
-        dt = datetime.datetime.strptime(created, '%Y-%m-%d-%H')
+        dt = datetime.datetime.strptime(created, '%Y-%m-%d')
         dt_now = datetime.datetime.now()
         s3_file_name = os.path.join(
             "source="+config["source"], 
