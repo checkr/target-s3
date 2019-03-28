@@ -162,6 +162,9 @@ def main():
             i += 1
             stream_map, last_state = create_stream_to_record_map(stream_map, line, config)
 
+            if last_state is not None and "state_file_path" in config:
+                persist_state(last_state, config)
+            
             if i == 100000:
                 flush(stream_map, last_state, tmp_path, config, s3)
                 i = 0
@@ -174,9 +177,6 @@ def flush(stream_map, last_state, tmp_path, config, s3):
     persist_stream_map(stream_map, tmp_path)
     upload_to_s3(tmp_path, config, s3)
     delete_tmp_dir(tmp_path)
-
-    if last_state is not None and "state_file_path" in config:
-        persist_state(last_state, config)
 
 if __name__ == '__main__':
     main()
