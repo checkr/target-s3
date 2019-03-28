@@ -28,8 +28,6 @@ def emit_state(state):
         sys.stdout.flush()
 
 def create_stream_to_record_map(stream_to_record_map, line, config):
-    last_state = None
-
     try:
         json_line = json.loads(line)
     except json.decoder.JSONDecodeError:
@@ -39,6 +37,7 @@ def create_stream_to_record_map(stream_to_record_map, line, config):
     if 'type' not in json_line:
         raise Exception(
             "Line is missing required key 'type': {}".format(line))
+    
     t = json_line['type']
 
     if t == 'RECORD':
@@ -70,10 +69,10 @@ def create_stream_to_record_map(stream_to_record_map, line, config):
 
         add_to_stream_records(stream_to_record_map, stream_name, line)
 
-        if t == 'STATE' and "state_file_path" in config:
-            last_state = json_line
+    if t == 'STATE' and "state_file_path" in config:
+        persist_state(json_line, config)
 
-    return (stream_to_record_map, last_state)
+    return stream_to_record_map
 
 
 def persist_stream_map(stream_map, tmp_path):
@@ -136,6 +135,7 @@ def persist_state(state, config):
 
     with open(path, 'w') as f:
         f.write(json.dumps(state["value"]))
+    
     logger.info("state file written " + path)
 
 
@@ -160,20 +160,17 @@ def main():
 
         for line in input:
             i += 1
-            stream_map, last_state = create_stream_to_record_map(stream_map, line, config)
+            stream_map = create_stream_to_record_map(stream_map, line, config)
 
-            if last_state is not None and "state_file_path" in config:
-                persist_state(last_state, config)
-            
             if i == 100000:
-                flush(stream_map, last_state, tmp_path, config, s3)
+                flush(stream_map, tmp_path, config, s3)
                 i = 0
                 stream_map = {}
                 tmp_path = create_temp_dir()
 
-        flush(stream_map, last_state, tmp_path, config, s3)
+        flush(stream_map, tmp_path, config, s3)
 
-def flush(stream_map, last_state, tmp_path, config, s3):
+def flush(stream_map, tmp_path, config, s3):
     persist_stream_map(stream_map, tmp_path)
     upload_to_s3(tmp_path, config, s3)
     delete_tmp_dir(tmp_path)
