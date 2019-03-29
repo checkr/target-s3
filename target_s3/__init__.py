@@ -98,16 +98,17 @@ def delete_tmp_dir(tmp_path):
 
 def upload_to_s3(tmp_path, config, s3):
     for f in os.listdir(tmp_path):
-        replication_method, file_name, created = f.split("::", 3)
+        replication_method, source, created = f.split("::", 3)
         dt = datetime.datetime.strptime(created, '%Y-%m-%d')
         dt_now = datetime.datetime.now()
+        file_name = source 
 
         if replication_method == 'LOG_BASED':
-            file_name = file_name+"_"+str(dt_now.minute)+str(dt_now.second)+str(dt_now.microsecond)
+            file_name = source+"_"+str(dt_now.minute)+str(dt_now.second)+str(dt_now.microsecond)
 
         s3_file_name = os.path.join(
             "source="+config["source"], 
-            "collection="+file_name, 
+            "collection="+source, 
             "year="+str(dt.year), 
             "month="+str(dt.month), 
             "day="+str(dt.day), 
