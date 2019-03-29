@@ -18,7 +18,6 @@ import dateutil.parser
 from distutils.util import strtobool
 
 logger = singer.get_logger()
-DATE_TO_UPLOAD_SEP="date_to_upload"
 
 def emit_state(state):
     if state is not None:
@@ -45,30 +44,25 @@ def create_stream_to_record_map(stream_to_record_map, line, state, config):
             raise Exception(
                 "Line is missing required key 'stream': {}".format(line))
         
-        time_created = None
+        time_created = datetime.datetime.now()
         replication_method = singer.get_bookmark(state['value'], json_line['stream'], 'replication_method')
-        initial_full_table_complete = singer.get_bookmark(state['value'], json_line['stream'], 'initial_full_table_complete')
+        stream_name = f'{replication_method}::{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
 
-        if replication_method == "FULL_TABLE" or (replication_method == "LOG_BASED" and initial_full_table_complete == False):
-            if 'partition_on_time_created' in config and bool(strtobool(config["partition_on_time_created"])):
-                for (k,v) in json_line['record'].items():
-                    if time_created is None:
-                        try:
-                            if k == "_id":
-                                oid = objectid.ObjectId(v)
-                                if oid.is_valid: time_created = oid.generation_time
-                            elif k == "created_at":
-                                time_created = dateutil.parser.parse(v)
-                        except:
-                            pass
-                    else:
-                        break
-        
-        if time_created:          
-            stream_name = f'{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
-        else:
-            dt = datetime.datetime.now()
-            stream_name = f'{json_line["stream"]}::{dt.year}-{dt.month}-{dt.day}'
+        if replication_method == "FULL_TABLE":
+            for (k,v) in json_line['record'].items():
+                if time_created is None:
+                    try:
+                        if k == "_id":
+                            oid = objectid.ObjectId(v)
+                            if oid.is_valid: time_created = oid.generation_time
+                        elif k == "created_at":
+                            time_created = dateutil.parser.parse(v)
+                    except:
+                        pass
+                else:
+                    break
+            
+            stream_name = f'{replication_method}::{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
 
         add_to_stream_records(stream_to_record_map, stream_name, line)
 
@@ -104,16 +98,20 @@ def delete_tmp_dir(tmp_path):
 
 def upload_to_s3(tmp_path, config, s3):
     for f in os.listdir(tmp_path):
-        file_name, created = f.split("::", 2)
+        replication_method, file_name, created = f.split("::", 3)
         dt = datetime.datetime.strptime(created, '%Y-%m-%d')
         dt_now = datetime.datetime.now()
+
+        if replication_method == 'LOG_BASED':
+            file_name = file_name+"_"+str(dt_now.minute)+str(dt_now.second)+str(dt_now.microsecond)
+
         s3_file_name = os.path.join(
             "source="+config["source"], 
             "collection="+file_name, 
             "year="+str(dt.year), 
             "month="+str(dt.month), 
             "day="+str(dt.day), 
-            file_name+"_"+str(dt_now.minute)+str(dt_now.second)+str(dt_now.microsecond)+".json")
+            file_name+".json")
 
         print("S3 path")
         print(s3_file_name)
