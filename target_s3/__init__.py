@@ -27,7 +27,7 @@ def emit_state(state):
         sys.stdout.write("{}\n".format(line))
         sys.stdout.flush()
 
-def create_stream_to_record_map(stream_to_record_map, line, config):
+def create_stream_to_record_map(stream_to_record_map, line, state, config):
     try:
         json_line = json.loads(line)
     except json.decoder.JSONDecodeError:
@@ -46,21 +46,24 @@ def create_stream_to_record_map(stream_to_record_map, line, config):
                 "Line is missing required key 'stream': {}".format(line))
         
         time_created = None
+        replication_method = singer.get_bookmark(state['value'], json_line['stream'], 'replication_method')
+        initial_full_table_complete = singer.get_bookmark(state['value'], json_line['stream'], 'initial_full_table_complete')
 
-        if 'partition_on_time_created' in config and bool(strtobool(config["partition_on_time_created"])):
-            for (k,v) in json_line['record'].items():
-                if time_created is None:
-                    try:
-                        if k == "_id":
-                            oid = objectid.ObjectId(v)
-                            if oid.is_valid: time_created = oid.generation_time
-                        elif k == "created_at":
-                            time_created = dateutil.parser.parse(v)
-                    except:
-                        pass
-                else:
-                    break
-
+        if replication_method == "FULL_TABLE" or (replication_method == "LOG_BASED" and initial_full_table_complete == False):
+            if 'partition_on_time_created' in config and bool(strtobool(config["partition_on_time_created"])):
+                for (k,v) in json_line['record'].items():
+                    if time_created is None:
+                        try:
+                            if k == "_id":
+                                oid = objectid.ObjectId(v)
+                                if oid.is_valid: time_created = oid.generation_time
+                            elif k == "created_at":
+                                time_created = dateutil.parser.parse(v)
+                        except:
+                            pass
+                    else:
+                        break
+        
         if time_created:          
             stream_name = f'{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
         else:
@@ -70,10 +73,10 @@ def create_stream_to_record_map(stream_to_record_map, line, config):
         add_to_stream_records(stream_to_record_map, stream_name, line)
 
     if t == 'STATE' and "state_file_path" in config:
+        state = json_line
         persist_state(json_line, config)
 
-    return stream_to_record_map
-
+    return (stream_to_record_map, state)
 
 def persist_stream_map(stream_map, tmp_path):
     for stream, lines in stream_map.items():
@@ -136,7 +139,7 @@ def persist_state(state, config):
     with open(path, 'w') as f:
         f.write(json.dumps(state["value"]))
     
-    logger.info("state file written " + path)
+    logger.debug("state file written " + path)
 
 
 def main():
@@ -156,11 +159,13 @@ def main():
     with io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8') as input:
         i = 0
         stream_map = {}
+        state = {}
+
         tmp_path = create_temp_dir()
 
         for line in input:
             i += 1
-            stream_map = create_stream_to_record_map(stream_map, line, config)
+            stream_map, state = create_stream_to_record_map(stream_map, line, state, config)
 
             if i == 100000:
                 flush(stream_map, tmp_path, config, s3)
