@@ -50,17 +50,14 @@ def create_stream_to_record_map(stream_to_record_map, line, state, config):
 
         if replication_method == "FULL_TABLE":
             for (k,v) in json_line['record'].items():
-                if time_created is None:
-                    try:
-                        if k == "_id":
-                            oid = objectid.ObjectId(v)
-                            if oid.is_valid: time_created = oid.generation_time
-                        elif k == "created_at":
-                            time_created = dateutil.parser.parse(v)
-                    except:
-                        pass
-                else:
-                    break
+                try:
+                    if k == "_id":
+                        oid = objectid.ObjectId(v)
+                        if oid.is_valid: time_created = oid.generation_time
+                    elif k == "created_at":
+                        time_created = dateutil.parser.parse(v)
+                except:
+                    pass
             
             stream_name = f'{replication_method}::{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
 
