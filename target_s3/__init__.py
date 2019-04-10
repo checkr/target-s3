@@ -163,7 +163,7 @@ def main():
             i += 1
             stream_map, state = create_stream_to_record_map(stream_map, line, state, config)
 
-            if i == 100000:
+            if i == 5000:
                 flush(stream_map, tmp_path, config, s3)
                 i = 0
                 stream_map = {}
