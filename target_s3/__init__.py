@@ -36,14 +36,14 @@ def create_stream_to_record_map(stream_to_record_map, line, state, config):
     if 'type' not in json_line:
         raise Exception(
             "Line is missing required key 'type': {}".format(line))
-    
+
     t = json_line['type']
 
     if t == 'RECORD':
         if 'stream' not in json_line:
             raise Exception(
                 "Line is missing required key 'stream': {}".format(line))
-        
+
         time_created = datetime.datetime.now()
         replication_method = singer.get_bookmark(state['value'], json_line['stream'], 'replication_method')
         stream_name = f'{replication_method}::{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
@@ -58,7 +58,7 @@ def create_stream_to_record_map(stream_to_record_map, line, state, config):
                         time_created = dateutil.parser.parse(v)
                 except:
                     pass
-            
+
             stream_name = f'{replication_method}::{json_line["stream"]}::{time_created.year}-{time_created.month}-{time_created.day}'
 
         add_to_stream_records(stream_to_record_map, stream_name, line)
@@ -98,17 +98,17 @@ def upload_to_s3(tmp_path, config, s3):
         replication_method, source, created = f.split("::", 3)
         dt = datetime.datetime.strptime(created, '%Y-%m-%d')
         dt_now = datetime.datetime.now()
-        file_name = source 
+        file_name = source
 
         if replication_method == 'LOG_BASED':
             file_name = source+"_"+str(dt_now.minute)+str(dt_now.second)+str(dt_now.microsecond)
 
         s3_file_name = os.path.join(
-            "source="+config["source"], 
-            "collection="+source, 
-            "year="+str(dt.year), 
-            "month="+str(dt.month), 
-            "day="+str(dt.day), 
+            "source="+config["source"],
+            "collection="+source,
+            "year="+str(dt.year),
+            "month="+str(dt.month),
+            "day="+str(dt.day),
             file_name+".json")
 
         print("S3 path")
@@ -134,7 +134,7 @@ def persist_state(state, config):
 
     with open(path, 'w') as f:
         f.write(json.dumps(state["value"]))
-    
+
     logger.debug("state file written " + path)
 
 
@@ -153,19 +153,20 @@ def main():
         config = json.load(input)
 
     with io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8') as input:
-        i = 0
+        bytes_in_file = 0
         stream_map = {}
         state = {}
 
         tmp_path = create_temp_dir()
 
         for line in input:
-            i += 1
+            bytes_in_file += sys.getsizeof(line)
             stream_map, state = create_stream_to_record_map(stream_map, line, state, config)
 
-            if i == 5000:
+            # flush after 10mb
+            if bytes_in_file > 10000000:
                 flush(stream_map, tmp_path, config, s3)
-                i = 0
+                bytes_in_file = 0
                 stream_map = {}
                 tmp_path = create_temp_dir()
 
