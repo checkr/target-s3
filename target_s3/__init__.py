@@ -30,10 +30,11 @@ def create_stream_to_record_map(stream_to_record_map, line, state, config):
     try:
         json_line = json.loads(line)
     except json.decoder.JSONDecodeError:
-        logger.error("Unable to parse:\n{}".format(line))
+        logger.error("Unable to parse:\n {line}".format(line=line))
         raise
 
     if 'type' not in json_line:
+        logger.error("Json line has no type:\n {line}".format(line=line))
         raise Exception(
             "Line is missing required key 'type': {}".format(line))
 
@@ -153,24 +154,30 @@ def main():
         config = json.load(input)
 
     with io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8') as input:
-        bytes_in_file = 0
-        stream_map = {}
-        state = {}
+        try:
+            bytes_in_file = 0
+            stream_map = {}
+            state = {}
 
-        tmp_path = create_temp_dir()
+            tmp_path = create_temp_dir()
 
-        for line in input:
-            bytes_in_file += sys.getsizeof(line)
-            stream_map, state = create_stream_to_record_map(stream_map, line, state, config)
+            for line in input:
+                bytes_in_file += sys.getsizeof(line)
+                try:
+                    stream_map, state = create_stream_to_record_map(stream_map, line, state, config)
+                except:
+                    logger.info('Failed to process log: \n ' + line)
 
-            # flush after 10mb
-            if bytes_in_file > 10000000:
-                flush(stream_map, tmp_path, config, s3)
-                bytes_in_file = 0
-                stream_map = {}
-                tmp_path = create_temp_dir()
+                # flush after 10mb
+                if bytes_in_file > 10000000:
+                    flush(stream_map, tmp_path, config, s3)
+                    bytes_in_file = 0
+                    stream_map = {}
+                    tmp_path = create_temp_dir()
 
-        flush(stream_map, tmp_path, config, s3)
+            flush(stream_map, tmp_path, config, s3)
+        except:
+            logger.info('Some par of buffer upload failed.')
 
 def flush(stream_map, tmp_path, config, s3):
     persist_stream_map(stream_map, tmp_path)
